@@ -17,6 +17,13 @@ if getattr(sys, 'frozen', False):
 
 
 def main():
+    # Windows 控制台默认 GBK，无法编码 ¥ 等字符，统一改用 UTF-8 输出。
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
     parser = argparse.ArgumentParser(description='淘宝双11任务助手：本地网页控制台 / 命令行')
     parser.add_argument('--cli', action='store_true', help='使用命令行执行任务')
     parser.add_argument('--port', type=int, default=8765, help='本机控制台端口，默认 8765')

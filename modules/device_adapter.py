@@ -79,8 +79,9 @@ class DeviceAdapter:
             import uiautomator2 as u2
             from modules.adb_transport import prepare_android_connection
             self.serial = prepare_android_connection(self.serial, on_status=self.on_status)
-            # 设置HTTP超时（模块级常量）
-            u2.HTTP_TIMEOUT = 20
+            # 设置HTTP超时（模块级常量）。平板/大屏的控件树和截图更大，
+            # 首次读取常常超过 20 秒，放宽到 30 秒避免误判为设备异常。
+            u2.HTTP_TIMEOUT = 30
             if self.serial:
                 # serial 可以是 IP:PORT（无线）或设备序列号（USB）
                 logger.info(f'连接安卓设备: {self.serial}')
@@ -94,8 +95,18 @@ class DeviceAdapter:
             # Automation dies silently on a dark display; tablets often sleep
             # within a minute. This temporary setting reverts on unplug/reboot.
             self.keep_awake_while_plugged()
+            self._log_screen_geometry()
         else:
             raise ValueError(f"不支持的设备类型: {self.device_type}")
+
+    def _log_screen_geometry(self):
+        """Log the resolved panel size so tablet issues are diagnosable."""
+        try:
+            width, height = self.display_size
+            logger.info('设备屏幕：%sx%s（%s）', width, height,
+                        '横屏' if width > height else '竖屏')
+        except Exception:
+            logger.debug('读取设备屏幕尺寸失败', exc_info=True)
 
     def _android_identity(self):
         """Keep USB and Wi-Fi transports of the same handset in one daily record."""

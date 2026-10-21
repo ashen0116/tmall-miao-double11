@@ -18,7 +18,7 @@ def open_taobao_search(device, text, control=None):
     while time.monotonic() < deadline:
         check()
         screen = reader.read()
-        search = screen.find(r'^搜索栏$|^搜索框$')
+        search = screen.find(r'^搜索(?:栏|框|商品)$')
         if search:
             check()
             device.click(*search.center)

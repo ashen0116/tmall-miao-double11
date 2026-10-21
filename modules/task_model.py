@@ -86,10 +86,13 @@ def parse_tasks(nodes, width=1440, height=3200):
     and works identically when the page exposes only a bitmap.
     """
     actions = []
+    # A tablet/landscape panel letterboxes a portrait Taobao window, so the
+    # right-hand action column no longer sits beyond 55% of the full width.
+    right_edge = width * (.45 if width > height else .55)
     for node in nodes:
         label = normalize(node.text)
         x, y = node.center
-        if ACTION_RE.fullmatch(label) and x > width * .55 and 0 < y < height * .985:
+        if ACTION_RE.fullmatch(label) and x > right_edge and 0 < y < height * .985:
             if not any(abs(y - old.center[1]) < height * .012 for old in actions):
                 actions.append(node)
     actions.sort(key=lambda n: n.center[1])

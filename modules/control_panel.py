@@ -335,9 +335,15 @@ class Controller:
                 self.device = device
                 device.preview_managed = True
                 self._ensure_daily()
+                geometry = ''
+                try:
+                    width, height = device.display_size
+                    geometry = f'（{width}×{height}，{"横屏" if width > height else "竖屏"}）'
+                except Exception:
+                    logger.debug('读取设备屏幕尺寸失败', exc_info=True)
                 self.update(connected=True, device=dict(type=kind, serial=device.serial or '自动选择'),
                             package=info.get('package', ''), status='ready', phase='ready',
-                            tasks=[], message='设备已连接，点击开始执行将自动打开活动并识别任务')
+                            tasks=[], message=f'设备已连接{geometry}，点击开始执行将自动打开活动并识别任务')
                 self._start_preview()
                 self.log('INFO', f'设备连接成功：{device}')
             elif action == 'capture':

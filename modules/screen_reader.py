@@ -158,6 +158,26 @@ class ScreenReader:
         self._last_preview = time.monotonic()
         return image
 
+    def _observed_size(self, nodes):
+        """Trust the control tree over a stale orientation reported by the driver.
+
+        Some tablets report a rotated window_size while dump_hierarchy keeps the
+        other orientation. When the bounds clearly exceed the reported panel and
+        fit after swapping, use the swapped dimensions.
+        """
+        try:
+            width, height = self.device.display_size
+        except Exception:
+            return (1440, 3200)
+        if nodes:
+            right = max(n.bounds[2] for n in nodes)
+            bottom = max(n.bounds[3] for n in nodes)
+            if right > width * 1.02 or bottom > height * 1.02:
+                if right <= height * 1.02 and bottom <= width * 1.02:
+                    logger.info('控件树方向与系统尺寸不一致，改用 %sx%s', height, width)
+                    return (height, width)
+        return (width, height)
+
     def enrich_regions(self, screen, regions):
         """OCR crops of this exact observed frame, keeping full-frame guards."""
         if not self.ocr_enabled or self.last_screen is not screen or self.last_image is None:
@@ -194,7 +214,7 @@ class ScreenReader:
               and time.monotonic() - self._last_preview >= 1):
             self._capture()
         if self._size is None:
-            self._size = self.device.display_size
+            self._size = self._observed_size(nodes)
         screen = Screen(nodes, *self._size, package, source, tree)
         self.last_screen = screen
         self.last_observation_seconds = time.monotonic() - started

@@ -391,8 +391,10 @@ class CampaignRunner:
 
     @staticmethod
     def activity_landing(screen):
+        # A landscape tablet panel shows the activity header lower than a phone.
+        top = screen.height * (.28 if screen.width > screen.height else .18)
         return any(0 < n.bounds[3] - n.bounds[1] < screen.height * .15
-                   and ((n.center[1] < screen.height * .18
+                   and ((n.center[1] < top
                          and re.search(r'^淘金币双11|^淘金币双.{0,4}狂享20亿|^淘金币首页$', normalize(n.text)))
                         or (n.center[1] < screen.height * .5 and normalize(n.text) == '升级赛车拿钱'))
                    for n in screen.nodes)
@@ -514,13 +516,18 @@ class CampaignRunner:
         # of reopening the search field or a product advertising an entry.
         descriptions = [n for n in screen.nodes if re.search(r'双11狂享20亿', normalize(n.text))
                         and n.center[1] < screen.height * .35]
+        # Portrait phones keep the original thresholds; wide/landscape panels
+        # (tablets) letterbox the app, so the card sits further left than 65%.
+        wide = screen.width > screen.height
+        title_limit = screen.width * (.45 if wide else .6)
+        action_limit = screen.width * (.45 if wide else .65)
         for description in descriptions:
-            title = any(normalize(n.text) == '淘金币' and n.center[0] < screen.width * .6
+            title = any(normalize(n.text) == '淘金币' and n.center[0] < title_limit
                         and 0 < description.center[1] - n.center[1] < screen.height * .08
                         for n in screen.nodes)
             if title:
                 action = next((n for n in screen.nodes if re.fullmatch(r'进入[>›》]?', normalize(n.text))
-                               and n.center[0] > screen.width * .65
+                               and n.center[0] > action_limit
                                and abs(n.center[1] - description.center[1]) < screen.height * .06), None)
                 if action:
                     return action
@@ -569,6 +576,7 @@ class CampaignRunner:
         official_clicks = 0
         awaiting_activity = False
         launch_pending = launched
+        last_trace = self.control.now() - 10
         while True:
             self.ensure_awake()
             self.guard(screen)
@@ -653,6 +661,10 @@ class CampaignRunner:
             elif ready:
                 action = None
                 target = self.activity_entry(screen, homepage=home_visible)
+                if not target and self.control.now() - last_trace >= 3:
+                    last_trace = self.control.now()
+                    logger.info('导航未找到活动入口：前台=%s，来源=%s，节点=%d，首页=%s',
+                                screen.package, screen.source, len(screen.nodes), home_visible)
                 key = ('activity', target.bounds if target else None)
                 if target and key not in clicked:
                     action = target
@@ -679,10 +691,18 @@ class CampaignRunner:
                             last_action = self.control.now()
                         else:
                             break
-                elif (not searched and screen.find(r'^搜索栏$|^搜索框$')
-                      and (restarted or back_count > 0 or home_reset)):
+                elif (not searched and screen.find(r'^搜索(?:栏|框|商品)$')
+                      and (restarted or back_count > 0 or home_reset
+                           or self.control.now() - last_action >= 8)):
+                    # Tablets can hide the campaign entry behind an icon, so once
+                    # the homepage is visible but no entry is found, search the
+                    # configured keyword instead of bouncing back forever.
                     from modules.utils import open_taobao_search
-                    open_taobao_search(self.device, self.config['search_keyword'], self.control)
+                    try:
+                        open_taobao_search(self.device, self.config['search_keyword'], self.control)
+                        self.update(message='未定位到活动入口，已改为搜索活动关键词')
+                    except RuntimeError as exc:
+                        logger.info('搜索兜底不可用：%s', exc)
                     searched = True
                     last_action = self.control.now()
                 elif back_count < min(2, self.config['max_back_steps']) and not restarted:
@@ -720,6 +740,8 @@ class CampaignRunner:
             self._restart_taobao(package)
             screen = self.read(force_ocr=bool(self.config['ocr']))
             return self._navigate_list(screen, allow_restart=False, recovering=recovering)
+        logger.warning('导航结束：前台=%s，来源=%s，节点=%d，返回%d次，已搜索=%s',
+                       screen.package, screen.source, len(screen.nodes), back_count, searched)
         reason = ('未能自动恢复淘宝活动任务列表' if recovering else '未能自动进入淘宝活动任务列表')
         reason += '，已保存现场；请检查活动入口是否变化后重试'
         saved = self.report_failure(reason, phase='returning' if recovering else 'locating')
@@ -836,8 +858,10 @@ class CampaignRunner:
     @staticmethod
     def _submit_buttons(screen, buttons=()):
         # Input hints may also say 搜索. Only the narrow upper-right action counts.
+        # A tablet panel letterboxes the search page, so the action sits left of 70%.
+        edge = screen.width * (.5 if screen.width > screen.height else .7)
         return [n for n in [*buttons, *screen.nodes] if normalize(n.text) == '搜索'
-                and n.center[0] > screen.width * .7 and 0 < n.center[1] < screen.height * .25
+                and n.center[0] > edge and 0 < n.center[1] < screen.height * .25
                 and 0 < n.bounds[2] - n.bounds[0] < screen.width * .3]
 
     def handle_search(self, screen):
