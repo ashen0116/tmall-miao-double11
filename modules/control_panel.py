@@ -22,6 +22,7 @@ from modules.campaign import CampaignRunner, NeedsAttention, RunControl, RunStat
 from modules.daily_state import DailyState, local_day
 from modules.notifications import notify_security_attention
 from modules.runtime import data_dir, version
+from modules.task_model import external_app_names
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
@@ -103,7 +104,8 @@ class Controller:
                           message='连接手机后，点击开始执行自动进入活动并识别任务', package='', source='',
                           current_task='', remaining=0, stats=asdict(RunStats()), tasks=[],
                           config=config or load_config(), device={}, logs=[], updated_at='',
-                          daily=None, last_failure=None, image_sequence=0, image_updated_at='')
+                          daily=None, last_failure=None, image_sequence=0, image_updated_at='',
+                          cross_app_options=external_app_names())
 
     def log(self, level, message):
         with self.lock:

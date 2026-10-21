@@ -1068,6 +1068,63 @@ class RunnerTests(unittest.TestCase):
                 validate_config(config)
 
 
+class CrossAppAllowlistTests(unittest.TestCase):
+    """A per-round choice of which external apps may be visited."""
+
+    def runner(self):
+        device = Mock()
+        device.device_type = 'uiautomator2'
+        r = CampaignRunner(device)
+        r.origin = 'com.taobao.taobao'
+        r.control.wait = Mock()
+        return r
+
+    def app_task(self, title='去微博看看热搜（0/1）'):
+        screen = task_screen()
+        screen.nodes[3].text = title
+        screen.nodes[4].text = '跳转得+400'
+        task = parse_tasks(screen.nodes)[0]
+        self.assertEqual(task.target_app, '微博')
+        self.assertEqual(task.kind, 'visit')
+        return task
+
+    def test_unselected_app_is_skipped_without_recording_a_device_fact(self):
+        r = self.runner()
+        r.config['allowed_cross_apps'] = ['支付宝']
+        self.assertIn('本轮未选择', r.cross_app_blocked(self.app_task()))
+        screen = task_screen()
+        screen.nodes[3].text = '去微博看看热搜（0/1）'
+        screen.nodes[4].text = '跳转得+400'
+        r.remember(r.tasks(screen))
+        record = list(r.records.values())[0]
+        self.assertEqual(record['status'], 'disabled')
+        self.assertIn('微博', record['reason'])
+        # The choice is reversible, so it must not become a daily skip fact.
+        self.assertEqual(r.unavailable_tasks, {})
+
+    def test_selected_app_and_empty_selection_both_run(self):
+        r = self.runner()
+        self.assertEqual(r.cross_app_blocked(self.app_task()), '')
+        r.config['allowed_cross_apps'] = ['微博']
+        self.assertEqual(r.cross_app_blocked(self.app_task()), '')
+        r.config['allow_cross_app'] = False
+        self.assertEqual(r.cross_app_blocked(self.app_task()), '')
+
+    def test_selection_is_normalized_and_invalid_values_rejected(self):
+        config = load_config()
+        config['allowed_cross_apps'] = ['支付宝', '支付宝', ' 闲鱼 ']
+        validate_config(config)
+        self.assertEqual(config['allowed_cross_apps'], ['支付宝', '闲鱼'])
+        config['allowed_cross_apps'] = []
+        validate_config(config)
+        self.assertIsNone(config['allowed_cross_apps'])
+        for bad in ('支付宝', [''], [None], [42]):
+            config = load_config()
+            config['allowed_cross_apps'] = bad
+            with self.assertRaises(ValueError):
+                validate_config(config)
+
+
 class NativeInputTests(unittest.TestCase):
     def test_capture_disconnect_uses_one_direct_adb_fallback(self):
         adapter = DeviceAdapter.__new__(DeviceAdapter)

@@ -67,10 +67,16 @@ EXTERNAL_APPS = (
     ('京东', ('com.jingdong.app.mall',)),
     ('拼多多', ('com.xunmeng.pinduoduo',)),
     ('闲鱼', ('com.taobao.idlefish',)),
+    ('百度', ('com.baidu.searchbox',)),
     ('菜鸟', ('com.cainiao.wireless',)),
     ('高德', ('com.autonavi.minimap',)),
     ('优酷', ('com.youku.phone',)),
 )
+
+
+def external_app_names():
+    """Distinct external app names offered as cross-app allowlist choices."""
+    return list(dict.fromkeys(name for name, _ in EXTERNAL_APPS))
 
 
 def parse_tasks(nodes, width=1440, height=3200):

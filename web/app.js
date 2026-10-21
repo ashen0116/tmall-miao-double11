@@ -10,7 +10,18 @@ let pollRequest=null, pollTimer, previewTimer, previewRequest=null, previewReady
 const clockText=seconds=>{seconds=Math.max(0,Math.floor(seconds||0));return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;};
 function el(tag, cls, text) {const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
 function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6000);}
-function config(){return {default_browse_seconds:Number($('browse-seconds').value),browse_extra_seconds:Number($('browse-extra').value),max_attempts:Number($('max-attempts').value),max_tasks:Number($('max-tasks').value),enabled_task_kinds:['browse','search','visit','claim'].filter(k=>$('kind-'+k).checked),allow_cross_app:$('cross-app').checked,ocr:$('ocr').checked,scroll_browse:$('scroll').checked,claim_rewards:$('claim').checked};}
+function config(){return {default_browse_seconds:Number($('browse-seconds').value),browse_extra_seconds:Number($('browse-extra').value),max_attempts:Number($('max-attempts').value),max_tasks:Number($('max-tasks').value),enabled_task_kinds:['browse','search','visit','claim'].filter(k=>$('kind-'+k).checked),allow_cross_app:$('cross-app').checked,allowed_cross_apps:[...document.querySelectorAll('#cross-apps input:checked')].map(i=>i.value),ocr:$('ocr').checked,scroll_browse:$('scroll').checked,claim_rewards:$('claim').checked};}
+let appsHash='';
+function renderApps(){
+  const options=state?.cross_app_options||[];if(!options.length)return;
+  const applied=state?.config?.allowed_cross_apps||[];
+  const hash=JSON.stringify([options,applied]);if(hash===appsHash)return;appsHash=hash;
+  const selected=new Set(applied),box=$('cross-apps');
+  box.replaceChildren(el('span','field-label','允许跳转的应用'));
+  for(const name of options){const label=el('label');const input=document.createElement('input');
+    input.type='checkbox';input.value=name;input.checked=selected.has(name);
+    label.append(input,document.createTextNode(name));box.append(label);}
+}
 async function action(name){
   if(requesting)return;
   if(['run','connect','configure'].includes(name)&&!$('settings-form').reportValidity())return;
@@ -66,7 +77,7 @@ function render(){
   $('last-failure').textContent=state.last_failure?`最近记录：${state.last_failure.reason||'执行未通过'}${failureTitle?' · '+failureTitle:''}`:'遇到验证、恢复失败或核验失败时记录现场，原始截图仅保存在本机。';
   $('package-name').textContent=state.package||'设备未连接';$('preview-source').textContent=state.source==='ocr'?'本地 OCR 识别':state.source==='ui'?'页面控件识别':'手机截图预览';
   if(!initialized){const c=state.config;$('browse-seconds').value=c.default_browse_seconds;$('browse-extra').value=c.browse_extra_seconds;$('max-attempts').value=c.max_attempts;$('max-tasks').value=c.max_tasks;$('cross-app').checked=c.allow_cross_app;$('ocr').checked=c.ocr;$('scroll').checked=c.scroll_browse;$('claim').checked=c.claim_rewards;for(const k of ['browse','search','visit','claim'])$('kind-'+k).checked=(c.enabled_task_kinds||['browse','search','visit','claim']).includes(k);initialized=true;}
-  renderTasks();renderLogs();preview();
+  renderApps();renderTasks();renderLogs();preview();
 }
 async function poll(){
   if(pollRequest)return pollRequest;

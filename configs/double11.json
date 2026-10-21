@@ -16,6 +16,7 @@
   "max_tasks": 80,
   "max_scroll_pages": 8,
   "enabled_task_kinds": ["browse", "search", "visit", "claim"],
+  "allowed_cross_apps": null,
   "allow_cross_app": true,
   "ocr": true,
   "scroll_browse": true,

@@ -12,6 +12,27 @@ from modules.task_model import TextNode, bounds_of, normalize
 
 logger = logging.getLogger(__name__)
 
+# The detector runs fastest near a 1000px short edge, which suits phones.
+# Tablets and wide screens expose the same captions on far more pixels, so
+# shrinking them to 1000px blurs small text; keep more of their detail.
+PHONE_OCR_EDGE = 1000
+LARGE_OCR_EDGE = 1600
+PHONE_MAX_EDGE = 1200
+
+
+def ocr_scale_for(width, height):
+    """Adaptive OCR input size, measured on the stable short edge.
+
+    A rotated tablet reports its long side as width, so the short edge keeps
+    portrait and landscape at the same effective text size. Phones keep the
+    classic compact input; larger screens keep more pixels, never upscaled.
+    """
+    short = min(width, height)
+    if short <= 0:
+        return 1.0
+    target = PHONE_OCR_EDGE if short <= PHONE_MAX_EDGE else LARGE_OCR_EDGE
+    return min(1.0, min(short, target) / short)
+
 
 @lru_cache(maxsize=1)
 def local_ocr_engine():
@@ -68,6 +89,7 @@ class ScreenReader:
         self._last_preview = 0
         self._ocr_cache_key = None
         self._ocr_cache_nodes = None
+        self._scale_notice = False
         self.last_observation_seconds = 0.0
 
     def _flatten(self, tree):
@@ -90,13 +112,21 @@ class ScreenReader:
         walk(tree)
         return nodes
 
+    def _scale_for(self, image):
+        scale = ocr_scale_for(image.width, image.height)
+        if not self._scale_notice:
+            self._scale_notice = True
+            logger.info('屏幕 %dx%d，本地 OCR 输入短边约 %dpx（缩放 %.2f）',
+                        image.width, image.height, round(min(image.size) * scale), scale)
+        return scale
+
     def _ocr(self, image):
         if self._engine is None:
             self._engine = local_ocr_engine()
         import numpy as np
-        # Limit image width to reduce CPU work, then map boxes back to the phone.
-        scale = min(1.0, 1000 / image.width)
-        resized = image.resize((round(image.width * scale), round(image.height * scale)))
+        # Keep enough pixels for this screen size, then map boxes back to it.
+        scale = self._scale_for(image)
+        resized = image if scale >= 1 else image.resize((round(image.width * scale), round(image.height * scale)))
         result = self._engine(np.asarray(resized), use_cls=False)
         results = zip(result.boxes, result.txts, result.scores) if result.boxes is not None else []
         nodes = []

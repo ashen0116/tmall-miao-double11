@@ -3,8 +3,28 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from modules.screen_reader import ScreenReader
+from modules.screen_reader import ScreenReader, ocr_scale_for
 from modules.task_model import TextNode
+
+
+class AdaptiveOcrScaleTests(unittest.TestCase):
+    """Phones stay compact; tablets keep enough pixels for small captions."""
+
+    def test_phone_portrait_and_landscape_share_one_input_size(self):
+        self.assertAlmostEqual(ocr_scale_for(1080, 2400), 1000 / 1080, places=3)
+        self.assertAlmostEqual(ocr_scale_for(2400, 1080), 1000 / 1080, places=3)
+
+    def test_tablet_keeps_more_pixels_than_the_phone_limit(self):
+        scale = ocr_scale_for(2032, 3048)
+        self.assertAlmostEqual(scale, 1600 / 2032, places=3)
+        self.assertGreater(min(2032, 3048) * scale, 1500)
+
+    def test_rotated_tablet_uses_the_stable_short_edge(self):
+        self.assertEqual(ocr_scale_for(3048, 2032), ocr_scale_for(2032, 3048))
+
+    def test_small_crops_are_never_upscaled(self):
+        self.assertEqual(ocr_scale_for(800, 400), 1.0)
+        self.assertEqual(ocr_scale_for(0, 0), 1.0)
 
 
 def readable_tree():

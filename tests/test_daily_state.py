@@ -106,7 +106,7 @@ class DailyStateTests(unittest.TestCase):
         store = self.store()
         item = store.failure(dict(reason='连接中断', phase='restore', capture_error='device offline'))
         self.assertEqual(item['screenshot'], '')
-        self.assertEqual(json.loads(Path(item['metadata']).read_text())['capture_error'], 'device offline')
+        self.assertEqual(json.loads(Path(item['metadata']).read_text(encoding='utf-8'))['capture_error'], 'device offline')
         store.stats_path.write_text('{broken', encoding='utf-8')
         recovered = self.store()
         self.assertTrue(recovered.recovery_warning)

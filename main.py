@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--max-tasks', type=int, help='本轮最大尝试次数')
     parser.add_argument('--no-ocr', action='store_true', help='关闭本地文字识别')
     parser.add_argument('--no-cross-app', action='store_true', help='跳过跨应用任务')
+    parser.add_argument('--cross-apps', help='只允许这些应用的跳转任务，逗号分隔，例如 支付宝,闲鱼')
     parser.add_argument('--log', dest='loglevel', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
     args = parser.parse_args()
     from modules.runtime import data_dir
@@ -55,6 +56,8 @@ def main():
         config['ocr'] = False
     if args.no_cross_app:
         config['allow_cross_app'] = False
+    if args.cross_apps:
+        config['allowed_cross_apps'] = [part.strip() for part in args.cross_apps.split(',') if part.strip()]
     validate_config(config)
     if not args.cli:
         from modules.control_panel import serve

@@ -54,6 +54,14 @@ def validate_config(config):
     query = config.setdefault('task_search_keyword', '手机壳')
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 40:
         raise ValueError('任务搜索词必须为 1～40 个字符')
+    allowlist = config.get('allowed_cross_apps')
+    if allowlist is not None:
+        if (not isinstance(allowlist, list)
+                or any(not isinstance(name, str) or not name.strip() or len(name) > 40 for name in allowlist)):
+            raise ValueError('跨应用范围必须为应用名称列表')
+        names = sorted(dict.fromkeys(name.strip() for name in allowlist))
+        # No selection means "every recognized app", not "no app at all".
+        config['allowed_cross_apps'] = names or None
     for key in ('entry_labels', 'task_entry_labels'):
         labels = config.get(key)
         if not isinstance(labels, list) or not labels or not all(isinstance(v, str) and 0 < len(v) < 80 for v in labels):
@@ -159,6 +167,19 @@ class CampaignRunner:
     @staticmethod
     def unavailable_key(task):
         return 'app:' + task.target_app if task.target_app else 'task:' + normalize(task.title)
+
+    def cross_app_blocked(self, task):
+        """A per-round choice of which external apps may be visited.
+
+        Unlike an unavailable app this never records a device fact, so the
+        task returns as soon as the selection changes.
+        """
+        allowed = self.config.get('allowed_cross_apps')
+        if not task.target_app or not allowed or not self.config['allow_cross_app']:
+            return ''
+        if task.target_app in allowed:
+            return ''
+        return f'本轮未选择{task.target_app}的跳转任务；在跨应用范围勾选后可再次执行'
 
     def availability_reason(self, task, check_installed=False):
         if task.kind in ('manual', 'done', 'claim'):
@@ -272,7 +293,7 @@ class CampaignRunner:
     def remember(self, tasks):
         for task in tasks:
             previous = self.records.get(task.key, {})
-            reason = task.skip_reason or self.availability_reason(task)
+            reason = task.skip_reason or self.cross_app_blocked(task) or self.availability_reason(task)
             state = ('done' if task.kind == 'done' else 'disabled' if reason.startswith(('已跳过', '未安装', '目标应用'))
                      else 'manual' if task.skip_reason else 'disabled' if reason else 'pending')
             if previous.get('status') in ('failed', 'disabled') and task.current == previous.get('current'):
@@ -518,6 +539,21 @@ class CampaignRunner:
         self._task_restart_used = True
         self.device.restart_app(package)
 
+    def ensure_awake(self):
+        """Dark tablets/phones sleep into unrecognizable frames; wake them.
+
+        A password lockscreen still needs the user; navigation stays bounded
+        and the saved failure screenshot shows the lock page.
+        """
+        try:
+            if callable(getattr(self.device, 'is_screen_on', None)) and not self.device.is_screen_on():
+                self.update(message='检测到屏幕已熄灭，正在唤醒设备')
+                logger.info('屏幕已熄灭，执行唤醒')
+                self.device.wake_screen()
+                self.control.wait(1)
+        except Exception:
+            logger.debug('唤醒设备失败，继续当前流程', exc_info=True)
+
     def _navigate_list(self, screen, *, allow_restart, recovering=False, launched=False):
         """One bounded navigation budget, including at most one cold restart."""
         package = self.origin or ('com.taobao.taobao4hmos' if self.device.device_type == 'hmdriver2'
@@ -534,6 +570,7 @@ class CampaignRunner:
         awaiting_activity = False
         launch_pending = launched
         while True:
+            self.ensure_awake()
             self.guard(screen)
             if self._accept_list(screen):
                 return screen
@@ -689,6 +726,7 @@ class CampaignRunner:
         raise NeedsAttention(reason, kind='navigation', evidence_saved=saved)
 
     def ensure_list(self, auto_open=False):
+        self.ensure_awake()
         self.update('locating', message='确认当前页面并进入活动任务列表')
         package = self.origin or ('com.taobao.taobao4hmos' if self.device.device_type == 'hmdriver2'
                                   else 'com.taobao.taobao')
@@ -1077,6 +1115,8 @@ class CampaignRunner:
                     continue
                 if not self.config['allow_cross_app'] and task.target_app:
                     self.records[task.key].update(status='disabled', reason='跨应用任务已关闭')
+                    continue
+                if self.cross_app_blocked(task):
                     continue
                 if self.failures[failure_key] < self.config['max_attempts']:
                     candidates.append(task)

@@ -91,6 +91,9 @@ class DeviceAdapter:
             self._device.settings['wait_timeout'] = 3
             self._device.settings['operation_delay'] = (0.1, 0.1)
             self.identity_serial = self._android_identity() or self.serial
+            # Automation dies silently on a dark display; tablets often sleep
+            # within a minute. This temporary setting reverts on unplug/reboot.
+            self.keep_awake_while_plugged()
         else:
             raise ValueError(f"不支持的设备类型: {self.device_type}")
 
@@ -167,6 +170,63 @@ class DeviceAdapter:
             self._device.swipe_ext(direction, box=box)
         else:
             self._device.swipe_ext(direction)
+
+    @serialized
+    def is_screen_on(self):
+        """Return True when the display is on; unknown drivers count as on.
+
+        uiautomator2's cached info reports screenOn=True for asleep HyperOS
+        tablets, so ask the system power service for the real state.
+        """
+        if self.device_type == 'uiautomator2':
+            try:
+                result = self._device.shell('dumpsys power | grep mWakefulness=')
+                output = getattr(result, 'output', result)
+                if isinstance(output, str) and 'mWakefulness=' in output:
+                    return 'Awake' in output
+            except Exception:
+                logger.debug('无法通过 dumpsys 读取屏幕状态', exc_info=True)
+            try:
+                return bool(self._device.info.get('screenOn', True))
+            except Exception:
+                return True
+        return True
+
+    @serialized
+    def wake_screen(self):
+        """Wake the display, dismiss a keyless lockscreen, then swipe up.
+
+        A password lock stays on its input page; the runner saves evidence and
+        asks the user to unlock instead of guessing credentials.
+        """
+        if self.device_type == 'uiautomator2':
+            try:
+                self._device.shell(['input', 'keyevent', 'KEYCODE_WAKEUP'])
+                self._device.shell(['wm', 'dismiss-keyguard'])
+            except Exception:
+                logger.debug('唤醒屏幕失败', exc_info=True)
+        else:
+            try:
+                # KEYCODE_WAKEUP; HarmonyOS keeps uitest's keyEvent injection.
+                self._device.shell('uitest uiInput keyEvent 224')
+            except Exception:
+                logger.debug('鸿蒙唤醒屏幕失败', exc_info=True)
+            return
+        try:
+            width, height = self.display_size
+            self._device.swipe(width * .5, height * .9, width * .5, height * .3, duration=.3)
+        except Exception:
+            logger.debug('解锁滑动未执行，等待本人处理锁屏', exc_info=True)
+
+    @serialized
+    def keep_awake_while_plugged(self):
+        """Keep the display on while charging over USB (temporary, not persisted)."""
+        if self.device_type != 'uiautomator2':
+            return
+        try:
+            self._device.shell(['svc', 'power', 'stayon', 'usb'])
+        except Exception:
+            logger.debug('设置充电保持亮屏失败，请手动保持屏幕常亮', exc_info=True)
 
     @serialized
     def go_back(self):
