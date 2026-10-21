@@ -95,6 +95,7 @@ class DeviceAdapter:
             # Automation dies silently on a dark display; tablets often sleep
             # within a minute. This temporary setting reverts on unplug/reboot.
             self.keep_awake_while_plugged()
+            self.lock_portrait()
             self._log_screen_geometry()
         else:
             raise ValueError(f"不支持的设备类型: {self.device_type}")
@@ -107,6 +108,17 @@ class DeviceAdapter:
                         '横屏' if width > height else '竖屏')
         except Exception:
             logger.debug('读取设备屏幕尺寸失败', exc_info=True)
+
+    def lock_portrait(self):
+        """Force portrait orientation so a tablet behaves like a large phone and
+        the activity layout stays in the portrait coordinate space the scripts
+        expect. Best-effort: any failure is logged, never fatal."""
+        try:
+            self._device.shell('settings put system accelerometer_rotation 0')
+            self._device.shell('wm rotation 0')
+            logger.info('已锁定设备竖屏方向（关闭自动旋转并固定为竖屏）')
+        except Exception:
+            logger.debug('锁定竖屏失败（不影响任务执行）', exc_info=True)
 
     def _android_identity(self):
         """Keep USB and Wi-Fi transports of the same handset in one daily record."""
