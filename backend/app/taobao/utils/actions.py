@@ -78,6 +78,297 @@ class TaskActions:
             return self.recover(), False, False
         return self.browse_destination(task, screen)
 
+    def page_config(self):
+        page = getattr(self, 'page', None)
+        return page if isinstance(page, dict) else {}
+
+    def product_cards(self, screen, pattern):
+        """把一张卡片上的标题/价格/标签都算作“这一格能点”的证据。
+
+        「点我得淘金币」这类奖励标签贴在卡片角落，字号很小；只认价格就会
+        整页找不到可点的东西。
+        """
+        cards = []
+        for node in screen.nodes:
+            text = normalize(node.text)
+            if not text or not pattern.search(text):
+                continue
+            if not screen.height*.08 < node.center[1] < screen.height*.95:
+                continue
+            if not 0 < node.bounds[3]-node.bounds[1] < screen.height*.14:
+                continue
+            if not screen.width*.04 < node.center[0] < screen.width*.96:
+                continue
+            cards.append(node)
+        return cards
+
+    @staticmethod
+    def same_page(before, after):
+        """同一页面内的状态变化（发币动画、按钮变灰）不算跳转。"""
+        if after.package != before.package:
+            return False
+        old = {normalize(n.text) for n in before.nodes if len(normalize(n.text)) > 1}
+        new = {normalize(n.text) for n in after.nodes if len(normalize(n.text)) > 1}
+        if not old or not new:
+            return False
+        return len(old & new) / len(old) >= .6
+
+    def grid_scroll(self, screen):
+        """页内找下一批可点卡片；滑不动就返回 None，交给停留兜底。"""
+        before = {normalize(n.text) for n in screen.nodes if len(normalize(n.text)) > 1}
+        self.device.swipe(round(screen.width*.5), round(screen.height*.78),
+                          round(screen.width*.5), round(screen.height*.42), duration=.5)
+        self.control.wait(.8)
+        fresh = self.read()
+        after = {normalize(n.text) for n in fresh.nodes if len(normalize(n.text)) > 1}
+        if not before or len(before & after) / len(before) > .85:
+            return None
+        return fresh
+
+    def click_products(self, screen, need, limit=8):
+        """点够 need 个卡片再返回：这类任务的计数只认真正的点击。
+
+        两种落地页并存：点开商品详情（需要退回来）和「点我得淘金币」这种
+        页内直接发币的网格（退出去就前功尽弃）。所以每次点完先看页面有没有
+        真的跳走，只有跳走了才按返回键。
+        """
+        pattern = re.compile(self.page_config().get('product_markers')
+                             or r'点我(?:得|领|拿)?(?:淘)?金币|领淘金币|金币已抵|'
+                                r'金币热卖价|[¥￥]\s*\d')
+        # 同一张卡片上，“点我得淘金币”标签、抵扣价、价格各是一行文字；按坐标
+        # 去重，否则三个任务点全落在同一张卡上。
+        label = re.compile(r'点我|领淘金币|领取淘金币|立即领取')
+        clicked = []
+        done = 0
+        retried = False
+        while done < min(need, limit):
+            cards = [n for n in self.product_cards(screen, pattern)
+                     if not any(abs(n.center[0]-x) < screen.width*.3
+                                and abs(n.center[1]-y) < screen.height*.09
+                                for x, y in clicked)]
+            card = (next((n for n in cards if label.search(normalize(n.text))), None)
+                    or (cards[0] if cards else None))
+            if card is None and not retried:
+                # 落地页还在渲染时先等一拍，别把没加载完当成“没有可点的卡”。
+                retried = True
+                self.control.wait(1.2)
+                screen = self.read()
+                continue
+            if card is None:
+                fresh = self.grid_scroll(screen)
+                if fresh is None:
+                    break
+                screen = fresh
+                if screen.package != self.origin or self.is_task_list(screen.nodes):
+                    break
+                continue
+            clicked.append(card.center)
+            left, top, right, bottom = card.bounds
+            self.update('browsing', message='点击第 %d 个（共 %d 个）' % (done+1, need))
+            logger.info('点击第 %d 个（共 %d 个）：%s', done+1, need, normalize(card.text)[:18])
+            self.device.click((left+right)//2, (top+bottom)//2)
+            self.control.wait(1.4)
+            done += 1
+            after = self.read()
+            if after.package != self.origin or self.is_task_list(after.nodes):
+                break
+            if self.same_page(screen, after):
+                screen = after
+                continue
+            self.device.go_back()
+            self.control.wait(1.0)
+            screen = self.read()
+        return done
+
+    def tap_once(self, screen, pattern=None):
+        """点掉页面上的一次性动作按钮（施肥 / 浇水）。
+
+        这类任务要的就是那一下点击：光停留在页面上不会计数，但也不该交给人工。
+        """
+        pattern = pattern or self.page_config().get('tap_labels') or (
+            r'^(?:去|立即|马上|一键|点击|立刻)?(?:施肥|浇水)(?:\s*\d+\s*次)?$')
+        button = next((n for n in screen.nodes
+                       if re.search(pattern, normalize(n.text))
+                       and 0 < n.bounds[3]-n.bounds[1] < screen.height*.12), None)
+        if button is None:
+            return None
+        logger.info('点击页面按钮：%s', normalize(button.text))
+        self.update('browsing', message='点击 %s' % normalize(button.text)[:6])
+        self.click(button)
+        self.control.wait(1.4)
+        return button
+
+    @staticmethod
+    def quiz_option(screen):
+        """找 A 选项。选项既可能是「A.内容」整行，也可能只有字母圆圈。"""
+        full, bare = [], []
+        for node in screen.nodes:
+            text = normalize(node.text)
+            match = re.match(r'^([A-DＡ-Ｄ])\s*[.、．:：)）]?\s*(.*)$', text)
+            if not match:
+                continue
+            if not screen.height*.1 < node.center[1] < screen.height*.92:
+                continue
+            if not 0 < node.bounds[3]-node.bounds[1] < screen.height*.16:
+                continue
+            if match.group(2) or re.search(r'[.、．:：)）]', text):
+                full.append((match.group(1), node))
+            else:
+                bare.append((match.group(1), node))
+        if len(full) >= 2:
+            return next((n for letter, n in full if letter in 'AＡ'), full[0][1])
+        # 只有字母圆圈时，要求它们竖排在同一列（A/B/C/D 并排），否则多半是
+        # 页面上的其它图标，不能当选项点。
+        if len(bare) >= 2:
+            xs = [n.center[0] for _, n in bare]
+            ys = {round(n.center[1] / (screen.height*.02)) for _, n in bare}
+            if max(xs) - min(xs) < screen.width*.25 and len(ys) >= 2:
+                return next((n for letter, n in bare if letter in 'AＡ'), bare[0][1])
+        return None
+
+    # 交卷按钮：趣味课堂选完 A 之后必须点「我选好了提交答案」，否则答案不会
+    # 被提交，下一轮又会对着同一个 A 再点一次。
+    QUIZ_SUBMIT_RE = (r'^(?:我选好了?)?[\s，,。、:：]*(?:提交答案|提交选择|确认答案|确认选择|'
+                      r'提交|确定|确认|交卷|完成答题|我选好了?)$')
+    # 前进按钮：只在“还没选”的时候点，选完必须先交卷。
+    QUIZ_ADVANCE_RE = (r'^(?:下一题|继续答题|继续|开始答题|立即答题|去答题|再答一次|'
+                       r'领取奖励|开心收下|收下奖励|已成功领取奖励\s*回到主页|回到主页|'
+                       r'返回首页|知道了|关闭)$')
+
+    def quiz_submit(self, screen):
+        """找交卷按钮。支持「我选好了提交答案」「我选好了」「提交答案」几种写法。"""
+        return screen.find(self.QUIZ_SUBMIT_RE)
+
+    def quiz_advance(self, screen):
+        return screen.find(self.QUIZ_ADVANCE_RE)
+
+    def quiz_scroll(self, screen):
+        """交卷按钮常压在折叠线以下：往下滑一屏把它露出来，滑不动返回 None。
+
+        滑出按钮时页面上的其它文字几乎不变（只是多出底部那一行），所以不能只
+        按“重复度高”判没动——先看有没有露出交卷按钮，再退回整体相似度判断。
+        """
+        before = {normalize(n.text) for n in screen.nodes if len(normalize(n.text)) > 1}
+        self.device.swipe(round(screen.width*.5), round(screen.height*.72),
+                          round(screen.width*.5), round(screen.height*.45), duration=.45)
+        self.control.wait(.8)
+        fresh = self.read()
+        after = {normalize(n.text) for n in fresh.nodes if len(normalize(n.text)) > 1}
+        if not before or before == after:
+            return None
+        if self.quiz_submit(fresh) is not None:
+            return fresh
+        if len(before & after) / len(before) > .9:
+            return None
+        return fresh
+
+    def answer_quiz(self, task, screen, cross=False, limit=18):
+        """趣味课堂这类答题：每题选 A → 点「我选好了提交答案」交卷 → 下一题。
+
+        页面结构不固定，所以按“有没有选过”分两步走：没选就选 A，选完必须先找到
+        交卷按钮；交卷按钮读不到就先往下滑一屏，实在没有才放弃。
+        """
+        passed = False
+        previous, repeats, answered = None, 0, False
+        for _ in range(limit):
+            self.control.check()
+            self.guard(screen)
+            if screen.package != self.origin or self.is_task_list(screen.nodes):
+                break
+            option = self.quiz_option(screen)
+            submit = self.quiz_submit(screen)
+            advance = self.quiz_advance(screen)
+            # 「我选好了」点下去就出解析页：正确答案 / 你的答案 / 回答正确(错误)，
+            # 底部是「已成功领取奖励 回到主页」。这时答案已经提交、金币也到账，
+            # 不能再回头去点选项（选项还留在页面上，点了只会原地打转）。
+            result = screen.find(r'正确答案|回答正确|回答错误|答案解析|已成功领取奖励')
+            if result is not None and submit is None:
+                logger.info('答题已交卷并出结果：%s', task.title)
+                self.update('browsing', message='答题完成')
+                passed = True
+                break
+            # 单题的判对提示（“答对啦”）后面还跟着“下一题”，不能当成整轮做完；
+            # 只有页面上再没有可选项、没有交卷按钮，且按钮是终结类，才算结束。
+            finished = screen.find(r'答题完成|答题结束|全部答完|恭喜你|答对\s*\d+\s*题|'
+                                   r'奖励已到账|领取成功')
+            if (finished is not None and option is None and submit is None
+                    and (advance is None or re.search(
+                        r'领取奖励|开心收下|收下奖励|知道了|关闭|完成',
+                        normalize(advance.text)))):
+                logger.info('答题完成：%s', task.title)
+                self.update('browsing', message='答题完成')
+                passed = True
+                break
+            if answered and submit is not None:
+                logger.info('答题交卷：%s', normalize(submit.text))
+                self.update('browsing', message='提交答案')
+                self.click(submit)
+                answered = False
+                self.control.wait(1.4)
+                if re.search(r'领取奖励|开心收下|收下奖励', normalize(submit.text)):
+                    passed = True
+                    break
+                screen = self.read()
+                continue
+            if option is not None:
+                # 页卡住不动时同一处 A 会被反复点，别把整轮预算耗在这里。
+                spot = option.center
+                same = bool(previous) and abs(spot[0]-previous[0]) < 2 \
+                    and abs(spot[1]-previous[1]) < 2
+                repeats = repeats + 1 if same else 1
+                previous = spot
+                if same and answered:
+                    # 已经选过、选项还原地不动、又没有读到交卷按钮：多半按钮在
+                    # 折叠线以下，滑一屏再判断；滑不动才认输。
+                    fresh = self.quiz_scroll(screen)
+                    if fresh is not None:
+                        screen = fresh
+                        continue
+                if repeats > 3:
+                    logger.warning('答题页面没有推进，放弃本次答题')
+                    break
+                logger.info('答题选 A：%s', normalize(option.text)[:16])
+                self.update('browsing', message='选择 A 选项')
+                self.click(option)
+                answered = True
+                self.control.wait(1.0)
+            else:
+                if advance is not None:
+                    if re.search(r'回到主页|返回首页|已成功领取', normalize(advance.text)):
+                        # 这条是解析页的收尾按钮，点了会跳到淘宝首页，离面板更远；
+                        # 交给后面的返回键逐层退回更省事。
+                        logger.info('答题已领奖：%s', task.title)
+                        self.update('browsing', message='答题完成')
+                        passed = True
+                        break
+                    logger.info('答题前进：%s', normalize(advance.text))
+                    self.update('browsing', message='答题')
+                    self.click(advance)
+                    answered = False
+                    self.control.wait(1.2)
+                    if re.search(r'领取奖励|开心收下|收下奖励', normalize(advance.text)):
+                        passed = True
+                        break
+                else:
+                    fresh = self.quiz_scroll(screen)
+                    if fresh is None:
+                        logger.warning('答题页既没有选项也没有按钮，放弃本次答题')
+                        break
+                    screen = fresh
+                    continue
+            screen = self.read()
+        # 逐层退回任务面板：答题页常常套在活动浮层里，盲目 recover 会连浮层一起关掉。
+        for _ in range(3):
+            screen = self.read()
+            if self.is_task_list(screen.nodes):
+                return screen, passed, cross
+            try:
+                self.device.go_back()
+            except Exception:
+                break
+            self.control.wait(1.0)
+        return self.recover(), passed, cross
+
     def browse_destination(self, task, screen):
         """Observe an already-open destination; callers confirm any entry first."""
         cross = screen.package != self.origin
@@ -86,6 +377,8 @@ class TaskActions:
                 return self.recover(), False, False
             self.stats.cross_app += 1
             logger.info('跨应用浏览：%s', screen.package)
+        if re.search(r'答题|趣味课堂|问答', normalize(task.title + ' ' + (task.detail or ''))):
+            return self.answer_quiz(task, screen, cross)
         # Captions rotate between browse/search promotions. The destination is
         # authoritative when a browse caption opens the activity search form.
         search_landing = (task.kind == 'browse' and screen.package == self.origin
@@ -94,6 +387,15 @@ class TaskActions:
             searched = self.handle_search(screen)
             if not searched:
                 return self.recover(), False, cross
+            screen = self.read()
+        # 「点击N个商品」只按停留计时永远不会达标：计数走的是真的点开商品。
+        counted = re.search(r'(?:点击|浏览|逛)\s*(\d{1,2})\s*个(?:商品|宝贝)',
+                            normalize(task.detail or task.title))
+        if counted and task.kind == 'browse' and screen.package == self.origin:
+            if self.click_products(screen, int(counted.group(1))):
+                screen = self.read()
+        # 施肥 / 浇水这类任务只认页面上那一下点击，停在页面上不会计数。
+        if screen.package == self.origin and self.tap_once(screen) is not None:
             screen = self.read()
         seconds = task.seconds or (self.config['visit_seconds'] if task.kind == 'visit'
                                     else self.config['default_browse_seconds'])

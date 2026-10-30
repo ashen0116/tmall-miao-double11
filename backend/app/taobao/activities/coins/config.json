@@ -13,13 +13,48 @@
   ],
   "daily_page": {
     "reset_list_scroll": true,
-    "list_markers": "赚金币抵钱|今日累计奖励|金币任务|今日速赚",
+    "list_markers": "赚金币抵钱|今日累计奖励|金币任务|今日速赚|更多金币等你赚|更多专享福利|收起更多任务",
     "landing_markers": "淘金币首页|升级赛车拿钱|赚更多金币|日常版",
     "inline_claims": [],
     "reward_rows": true,
     "browse_counter": "浏览([0-9]{1,2})秒可领",
     "expand_label": "展开",
-    "expand_context": "更多金币等你赚"
+    "expand_context": "更多金币等你赚",
+    "inline_watch_markers": "淘宝直播|直播间",
+    "voice_search_markers": "语音搜索|语音得金币",
+    "app_visit_seconds": {
+      "百度极速版": 15,
+      "天猫": 12,
+      "淘宝直播": 12,
+      "支付宝": 10,
+      "闲鱼": 12,
+      "京东": 12,
+      "拼多多": 12,
+      "头条": 20
+    },
+    "stall_timeout": 20,
+    "product_markers": "点我(?:得|领|拿)?(?:淘)?金币|领淘金币|金币已抵|金币热卖价|[¥￥]\\s*\\d",
+    "tap_labels": "^(?:去|立即|马上|一键|点击|立刻)?(?:施肥|浇水)(?:\\s*\\d+\\s*次)?$",
+    "rescan_rounds": 6
   },
-  "max_scroll_pages": 4
+  "max_scroll_pages": 10,
+  "jump_words": {
+    "allow": [
+      "去天猫",
+      "打开天猫",
+      "前往天猫",
+      "去淘宝直播",
+      "打开淘宝直播",
+      "前往淘宝直播",
+      "去百度极速版",
+      "打开百度极速版",
+      "前往",
+      "继续前往",
+      "仍要打开",
+      "仍要前往",
+      "打开应用",
+      "允许一次",
+      "仅本次"
+    ]
+  }
 }

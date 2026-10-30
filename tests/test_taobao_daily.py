@@ -172,7 +172,8 @@ class TaobaoDailyTests(unittest.TestCase):
             self.assertEqual(tasks[0].bounds,card.bounds)
             self.assertEqual((tasks[1].kind,tasks[1].seconds),('browse',15))
             self.assertEqual((tasks[2].kind,tasks[2].target_app),('visit','支付宝'))
-            self.assertEqual(tasks[3].kind,'manual')
+            # 趣味课堂答题每题选 A 即可，交给 quiz 流程执行，不再留给人工。
+            self.assertEqual(tasks[3].kind,'visit')
 
     def test_coin_quick_and_normal_sections_merge_mirrors_and_keep_extra_tasks(self):
         runner=self.runner()
@@ -185,7 +186,8 @@ class TaobaoDailyTests(unittest.TestCase):
                TextNode('去完成',(1160,3030,1360,3100))]
         tasks=runner.parse_tasks(nodes,1440,3200)
         self.assertEqual([t.title for t in tasks],['任务到访得金币','浏览精选商品'])
-        self.assertEqual(tasks[0].bounds,(1200,920,1310,990))
+        # 行以右侧按钮为锚点，bounds 即按钮落点；奖励徽章只参与判断不再作为坐标。
+        self.assertEqual(tasks[0].bounds,(1160,2850,1360,2920))
         # The modal title stays fixed while the section separator scrolls away.
         scrolled=[nodes[0],TextNode('浏览精选商品(0/1)',(250,800,780,860)),
                   TextNode('去完成',(1160,830,1360,900))]
@@ -324,7 +326,8 @@ class TaobaoDailyTests(unittest.TestCase):
             TextNode('答题领肥料',(100,710,400,750)),
             TextNode('去答题',(1400,670,1600,730)),
         ],1800,2880)
-        self.assertEqual([t.kind for t in tasks],['browse','manual'])
+        # 答题行同样归入可执行的 visit，选项与提交由答题流程处理。
+        self.assertEqual([t.kind for t in tasks],['browse','visit'])
 
     def test_completed_coin_row_moves_to_bottom_without_reward_circle(self):
         runner = self.runner()
