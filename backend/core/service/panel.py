@@ -361,14 +361,17 @@ class Controller(ActivityPipeline, PreviewWorker):
                     activities = self._validate_plan(payload.get('activities', self.state['activity_plan']))
                     if not activities:
                         raise ValueError('请至少选择一个已安装活动')
-                    payload = dict(payload, activities=activities)
+                    payload = dict(payload, activities=activities, resume_completed=payload.get('resume_completed',
+                        len(activities) > 1 and self.state['status'] in ('error', 'stopped', 'needs_attention')))
+                    if not isinstance(payload['resume_completed'], bool):
+                        raise ValueError('resume_completed 必须为布尔值')
                     if len(activities) > 1 and not payload.get('auto_open', True):
                         raise ValueError('多个活动的流水线必须自动进入活动')
                 if (self.registration and not planned_run and
                         (payload.get('app', self.registration.app.id) != self.registration.app.id
                          or payload.get('activity', self.registration.activity.id) != self.registration.activity.id)):
                     raise ValueError('请先选择对应应用和活动')
-                if action not in ('connect', 'wifi_pair', 'wifi_connect', 'scan', 'run', 'open_app', 'capture', 'configure', 'select_instance', 'refresh_instances'):
+                if action not in ('connect', 'wifi_pair', 'wifi_connect', 'scan', 'run', 'open_app', 'capture', 'configure', 'reset_tasks', 'select_instance', 'refresh_instances'):
                     raise ValueError('未知操作')
                 if action in ('wifi_pair', 'wifi_connect'):
                     if self.registration is None and payload.get('connect_address'):
@@ -415,7 +418,7 @@ class Controller(ActivityPipeline, PreviewWorker):
                         self.state['all_instances'] = payload['all_instances']
                     self.control = RunControl()
                     self.update(config=config, status={'connect': 'connecting', 'wifi_pair': 'connecting', 'wifi_connect': 'connecting', 'scan': 'scanning',
-                                                      'run': 'running', 'capture': 'scanning',
+                                                      'run': 'running', 'capture': 'scanning', 'reset_tasks': 'scanning',
                                                       'open_app':'scanning',
                                                       'select_instance': 'scanning', 'refresh_instances': 'scanning'}[action],
                                 message='正在连接手机' if action in ('connect', 'wifi_pair', 'wifi_connect') else '正在读取手机页面')
@@ -496,6 +499,14 @@ class Controller(ActivityPipeline, PreviewWorker):
                 self._start_preview()
                 self._instance_availability('设备已连接，请确认应用实例后开始自动执行')
                 self.log('INFO', f'设备连接成功：{device}')
+            elif action == 'reset_tasks':
+                self._ensure_daily()
+                self.task_policy.reset()
+                self.unavailable_tasks.clear()
+                self._persist_state()
+                self.update(tasks=[], task_scope=uuid.uuid4().hex, status='ready', phase='ready', current_task='',
+                            message='任务标记已清空，今日累计保留；点击开始重新识别')
+                self.log('INFO', '已清空当前活动实例的任务标记，累计统计保留')
             elif action == 'open_app':
                 self.control.check()
                 with self.device.instance_session():
@@ -598,11 +609,11 @@ class Controller(ActivityPipeline, PreviewWorker):
                 self._select_instance(instance_id)
             self._ensure_daily()
             started_daily = self.daily
-            if action == 'run' and started_daily and started_daily.activity_finished():
+            if action == 'run' and payload.get('resume_completed') is True and started_daily and started_daily.activity_finished():
                 self.log('INFO', '今日此活动已执行完成，跳过所选实例并继续流水线')
                 self._queue_status(instance_id, 'finished')
                 continue
-            if action == 'scan' and started_daily:
+            if action in ('scan', 'run') and started_daily:
                 started_daily.mark_activity_finished(False)
             self._queue_status(instance_id, 'running')
             session_id = uuid.uuid4().hex
@@ -618,14 +629,32 @@ class Controller(ActivityPipeline, PreviewWorker):
                      ('：' + known[instance_id]['label'] if instance_id in known else ''))
             context = self.device.instance_session() if instance_id else nullcontext()
             from backend.core.device.comfort import device_comfort
-            with context, device_comfort(self.device, config if action == 'run' else {}):
+            with context, device_comfort(self.device, config if action == 'run' else {}, notify=self.log):
                 if action == 'scan':
                     runner.scan(auto_open=auto_open)
                 else:
+                    if config.get('clear_clipboard', True):
+                        self.control.check()
+                        try:
+                            self.device.clear_clipboard()
+                        except (Stopped, InstanceMismatch):
+                            raise
+                        except Exception:
+                            # Never log clipboard contents or change the IME to
+                            # gain access on a restricted device.
+                            self.log('INFO', '当前设备未能清空剪贴板，已继续执行；如出现链接弹窗请手动关闭')
+                        self.control.check()
                     runner.run(auto_open=auto_open)
             if (action == 'run' and getattr(runner, 'daily_exhausted', False) is True
                     and started_daily is not None and self.daily is started_daily and started_daily.date == local_day()):
                 started_daily.mark_activity_finished()
+            if action == 'run' and config.get('reset_after_activity', False) and runner.stats.attempts < config['max_tasks']:
+                runner.reset_task_marks()
+                self.log('INFO', '清理任务标记后复查一次，累计统计保留')
+                with (self.device.instance_session() if instance_id else nullcontext()), device_comfort(self.device, config, notify=self.log):
+                    runner.run(auto_open=True)
+                if started_daily is not None:
+                    started_daily.mark_activity_finished(bool(getattr(runner, 'daily_exhausted', False)))
             self._persist_state()
             self._queue_status(instance_id, 'finished')
             self._save_report()

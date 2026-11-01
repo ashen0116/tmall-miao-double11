@@ -51,9 +51,26 @@ class TaskPolicy:
             self._save()
             return item['failures']
 
+    def progress(self, task):
+        """A verified advance ends the failure streak, without changing user choices."""
+        with self.lock:
+            identity = task_identity(task)
+            item = self.entries.get(identity)
+            if item and ('failures' in item or 'exhausted' in item):
+                item.pop('failures', None)
+                item.pop('exhausted', None)
+                if not item:
+                    self.entries.pop(identity, None)
+                self._save()
+
     def mark_browse_once(self, task):
         with self.lock:
             self.entries.setdefault(task_identity(task), {})['browse_once_attempted'] = True
+            self._save()
+
+    def reset(self):
+        with self.lock:
+            self.entries.clear()
             self._save()
 
     def choose(self, identity, skip):

@@ -33,7 +33,7 @@
       if(typeof activity.description==='string'&&activity.description.trim()){
         const group=node('span','activity-choice'),info=node('button','activity-info-button','!');info.type='button';info.setAttribute('aria-label',activity.label+'活动说明');info.setAttribute('aria-haspopup','dialog');info.title='活动说明';
         info.addEventListener('click',()=>{$('activity-info-title').textContent=activity.label+' · 活动说明';$('activity-info-content').textContent=activity.description;if(!infoDialog.open)infoDialog.showModal();});
-        group.append(tile,info);list.append(group);
+        tile.className='activity-choice-label';group.className='activity-choice activity-tile';group.classList.toggle('selected',selected);group.append(tile,info);list.append(group);
       }else list.append(tile);}
     if(!current?.activities?.length){const empty=node('div','activity-empty');empty.append(node('strong','','按需安装，保持轻量'),node('p','','活动独立更新，框架无需为每个活动重新下载。'));const button=node('button','feature-button','打开活动中心');button.type='button';button.addEventListener('click',()=>window.dispatchEvent(new Event('miaotask:open-activity-center')));empty.append(button);list.append(empty);}
     const queue=$('activity-pipeline');queue.replaceChildren();

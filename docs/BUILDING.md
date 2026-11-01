@@ -130,3 +130,9 @@ GitHub Windows 发布构建使用 `scripts/package_windows.py --preinstall-all`�
 容灾验收应模拟 API 403：备用通道列出新应用和最新提交、仅安装所选活动；卸载后断网恢复、整个活动目录丢失后从随包基线恢复、损坏包拒绝恢复、空闲轮询不反复访问远端。打包预装项会同步写入 `_internal/activity-recovery` 和可写活动恢复缓存。
 
 v0.1.4 发布包使用 `--preinstall-all`，预装本次源码中的全部六项活动及各自恢复包。它与 `--preinstall-activity` 显式选择及 `--include-activities` 内置模式互斥；纯框架默认构建保持不变。
+
+## 测试类别与活动预装策略
+
+回归按类别归并至 21 个 `test_*.py`，保留连接、识别、实例、任务、存储、活动分发、前端及发布隔离用例；相近测试直接合并，不用转发文件维持重复入口。共享合成夹具从所属类别模块导入。脚本保留独立的检查、构建和站点职责，总数低于 30。
+
+直接 Windows 构建默认读取各活动配置的 `bundle_by_default`；现有六项活动均为 true，未来非默认活动设为 false。`--preinstall-all` 同样遵循该策略；`--framework-only` 明确生成纯框架，显式活动列表仍可覆盖默认。Release Builder 未提供活动列表时采用源码默认策略；显式空列表保留纯框架选项。
