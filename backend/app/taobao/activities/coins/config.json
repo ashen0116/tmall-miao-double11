@@ -35,7 +35,8 @@
     "stall_timeout": 20,
     "product_markers": "点我(?:得|领|拿)?(?:淘)?金币|领淘金币|金币已抵|金币热卖价|[¥￥]\\s*\\d",
     "tap_labels": "^(?:去|立即|马上|一键|点击|立刻)?(?:施肥|浇水)(?:\\s*\\d+\\s*次)?$",
-    "rescan_rounds": 6
+    "rescan_rounds": 6,
+    "promotion_markers": "送你能量"
   },
   "max_scroll_pages": 10,
   "jump_words": {
@@ -56,5 +57,6 @@
       "允许一次",
       "仅本次"
     ]
-  }
+  },
+  "bundle_by_default": true
 }

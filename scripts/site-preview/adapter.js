@@ -40,6 +40,7 @@
       else if(!w)throw Error('演示工作区不存在');
       else if(path==='/api/state')result=snapshot(w);
       else if(path==='/api/select_pipeline'){w.activity_plan=payload.activities;const first=payload.activities[0];if(first){w.app=first.app;w.activity=first.activity;}result={ok:true};}
+      else if(path==='/api/reset_tasks'){w.tasks=tasks();result={ok:true};}
       else if(path==='/api/configure'){w.config=clone(payload.config||{});result={ok:true};}
       else if(path==='/api/task_skip'||path==='/api/task_execute'){const task=w.tasks.find(t=>t.task_id===payload.task_id);if(task?.controllable){task.enabled=path.endsWith('task_execute');task.status=task.enabled?'pending':'disabled';}result={ok:true};}
       else throw Error(blocked);

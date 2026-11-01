@@ -108,7 +108,7 @@ class SessionLoop:
 
     def run(self, auto_open=False):
         self.daily_exhausted = False
-        self.started = time.monotonic()
+        self.started = time.monotonic() - self.stats.elapsed
         try:
             screen = self.ensure_list(auto_open)
         except (Stopped, NeedsAttention, InstanceMismatch):
@@ -124,7 +124,7 @@ class SessionLoop:
         scrolls, total_attempts, page_turns = 0, 0, 0
         # 换批后仍没有可执行任务时，连续空批次达到上限就收工，不再翻完剩余批次
         empty_batches, paged = 0, False
-        empty_batch_stop = max(1, int(self.config.get('empty_batch_stop', 1)))
+        empty_batch_stop = max(1, int(self.config.get('empty_batch_stop', 3)))
         while total_attempts < self.config['max_tasks']:
             self.control.check()
             self.guard(screen)
@@ -135,7 +135,8 @@ class SessionLoop:
                 from backend.core.execution.task_policy import task_identity
                 if (task_identity(task), task.current) in verified_progress:
                     if task.key in self.records:
-                        self.records[task.key].update(status="done", enabled=False)
+                        self.records[task.key].update(status='pending' if task.current < task.total else 'done', enabled=False,
+                                                     reason='本次进度已核验，等待页面刷新；未视为全部完成')
                     continue
                 if task.kind in ('done', 'manual') or self.records[task.key]['status'] == 'disabled':
                     continue
@@ -154,6 +155,12 @@ class SessionLoop:
                 empty_batches += 1
                 if empty_batches >= empty_batch_stop:
                     logger.info('连续 %d 批没有可执行任务，提前结束本轮扫描', empty_batches)
+                    if not final_rescan:
+                        final_rescan = True
+                        screen = self.ensure_list(True)
+                        seen_pages.clear()
+                        scrolls = empty_batches = 0
+                        continue
                     break
             if candidates:
                 empty_batches, paged = 0, False
@@ -219,7 +226,9 @@ class SessionLoop:
                     self.records[task.key].update(status='disabled', reason=disabled_reason, enabled=False)
                     logger.info('已跳过 %s：%s', task.title, disabled_reason)
                 elif success:
-                    verified_progress.add((task_identity(task), task.current))
+                    self.task_policy.progress(task)
+                    if task.total == 1 or task.kind == 'claim':
+                        verified_progress.add((task_identity(task), task.current))
                     if task.kind == 'claim':
                         self.stats.claims += 1
                     else:

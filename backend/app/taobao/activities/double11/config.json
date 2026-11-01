@@ -11,5 +11,6 @@
     "赚体力",
     "做任务",
     "赚喵币"
-  ]
+  ],
+  "bundle_by_default": true
 }

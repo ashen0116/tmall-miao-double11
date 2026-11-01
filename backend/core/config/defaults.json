@@ -29,5 +29,8 @@
   "swipe_burst_max": 3,
   "claim_rewards": true,
   "minimum_volume": false,
-  "minimum_brightness": false
+  "minimum_brightness": false,
+  "reset_after_activity": false,
+  "keep_screen_on": false,
+  "clear_clipboard": true
 }

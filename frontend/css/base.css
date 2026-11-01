@@ -339,3 +339,5 @@ main{margin:0 0 0 204px;width:calc(100% - 204px);max-width:none;padding:26px 28p
 .activity-info-button:focus-visible{outline:2px solid currentColor;outline-offset:3px}
 #activity-info{width:min(560px,92vw);max-height:85vh;overflow:auto}
 .activity-info-content{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;font-size:16px;padding:16px 0 4px}
+
+.activity-choice.activity-tile{gap:5px;padding:8px 10px}.activity-choice-label{display:inline-flex;align-items:center;gap:7px;cursor:pointer}.activity-choice .activity-info-button{width:17px;height:17px;font-size:11px;line-height:1;border-width:1px}
